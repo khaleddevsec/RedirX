@@ -1,0 +1,79 @@
+# ==============================================================================
+# RedirX - Comprehensive .gitignore
+# Prevents accidental commit of binaries, secrets, logs, local data & legacy files
+# ==============================================================================
+
+# Compiled binaries and release builds
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+redirx
+
+# Legacy reference files & Python artifacts
+No-Redirect.py
+*.py
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# RedirX application data & output directories
+/RedirX/
+results/
+reports/
+logs/
+backups/
+wordlists/
+*.log
+*.bak
+*.old
+
+# Security, credentials & environment files
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.token
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+credentials.json
+*secret*
+*credential*
+
+# Test output and coverage
+*.test
+*.out
+coverage.*
+test-results/
+
+# Editor and IDE configurations
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# Operating System metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini

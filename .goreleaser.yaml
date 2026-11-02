@@ -1,0 +1,45 @@
+version: 2
+
+project_name: redirx
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: redirx
+    main: ./cmd/redirx
+    binary: redirx
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X redirx/pkg/version.Version={{ .Version }}
+      - -X redirx/pkg/version.Commit={{ .Commit }}
+      - -X redirx/pkg/version.BuildDate={{ .Date }}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - configs/**
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
