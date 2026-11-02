@@ -84,7 +84,7 @@ SSRF defense, and comprehensive reporting (TXT, HTML, JSON).`,
 
 	// Output & Logging
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Enable verbose output with detailed debugging")
-	rootCmd.Flags().BoolVar(&flagSilent, "silent", false, "Silent mode (suppress banners, only display findings)")
+	rootCmd.Flags().BoolVarP(&flagSilent, "silent", "s", false, "Silent mode (suppress banners, only display findings)")
 	rootCmd.Flags().StringVarP(&flagName, "name", "n", "", "Custom result filename (e.g. my-scan)")
 	rootCmd.Flags().StringVar(&flagFormat, "format", "txt", "Output format(s), comma-separated (txt, html, json)")
 	rootCmd.Flags().StringVarP(&flagOutput, "output", "o", "", "Custom output destination path or directory")
