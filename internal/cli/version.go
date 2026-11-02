@@ -11,10 +11,9 @@ import (
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Display RedirX version and build information",
+		Short: "Display RedirX version and banner information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version.Info())
+			fmt.Println(version.Banner())
 		},
 	}
 }
-

@@ -124,7 +124,7 @@ SSRF defense, and comprehensive reporting (TXT, HTML, JSON).`,
 func runRoot(cmd *cobra.Command, args []string) error {
 	// 1. Handle quick flags
 	if flagVersion {
-		fmt.Println(version.Info())
+		fmt.Println(version.Banner())
 		return nil
 	}
 
@@ -154,6 +154,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if len(targets) == 0 {
+		fmt.Println(version.Banner())
 		return cmd.Help()
 	}
 
@@ -315,15 +316,8 @@ func collectTargets() ([]string, error) {
 }
 
 func printBanner(dataDir string, targetCount int) {
-	fmt.Println(logger.ColorCyan + logger.ColorBold + `
-    ____           ___       _  __
-   / __ \___  ____/ (_)____ | |/ /
-  / /_/ / _ \/ __  / / ___/ |   / 
- / _, _/  __/ /_/ / / /    /   |  
-/_/ |_|\___/\__,_/_/_/    /_/|_|  ` + logger.ColorReset + logger.ColorMagenta + "v" + version.Version + logger.ColorReset)
-	fmt.Println(logger.ColorBold + " Advanced Open Redirect Detection & Analysis Engine" + logger.ColorReset)
-	fmt.Println(logger.ColorGreen + " Developer: " + logger.ColorReset + version.Author + " | " + logger.ColorBlue + "https://github.com/khaleddevsec/RedirX" + logger.ColorReset)
-	fmt.Printf(logger.ColorGray+" Data Directory: %s | Active Targets: %d\n\n"+logger.ColorReset, dataDir, targetCount)
+	fmt.Print(version.Banner())
+	fmt.Printf(logger.ColorGray+"  Data Directory: %s | Active Targets: %d\n\n"+logger.ColorReset, dataDir, targetCount)
 }
 
 func printSummary(summary models.ScanSummary, reportPaths []string) {

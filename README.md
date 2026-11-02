@@ -5,9 +5,9 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/khaleddevsec/RedirX)](https://goreportcard.com/report/github.com/khaleddevsec/RedirX)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/Release-v3.1.2-emerald.svg)](https://github.com/khaleddevsec/RedirX/releases)
-[![Developer](https://img.shields.io/badge/Developer-Md.%20Khaledul%20Islam%20(@khaleddevsec)-indigo.svg)](https://github.com/khaleddevsec)
+[![Developer](https://img.shields.io/badge/Developer-khaleddevsec-indigo.svg)](https://github.com/khaleddevsec)
 
-**RedirX** is an advanced, high-performance, evidence-based CLI security tool developed by **Md. Khaledul Islam ([@khaleddevsec](https://github.com/khaleddevsec))** and written in idiomatic Go. Engineered to detect, validate, and analyze Open Redirect vulnerabilities ([CWE-601](https://cwe.mitre.org/data/definitions/601.html)), RedirX delivers multi-stage injection, hop-by-hop redirect tracking, baseline comparison, SSRF defense, client-side JavaScript/Meta-refresh detection, and comprehensive reporting (TXT, HTML, JSON).
+**RedirX** is an advanced, high-performance, evidence-based CLI security tool developed by **khaleddevsec ([@khaleddevsec](https://github.com/khaleddevsec))** and written in idiomatic Go. Engineered to detect, validate, and analyze Open Redirect vulnerabilities ([CWE-601](https://cwe.mitre.org/data/definitions/601.html)), RedirX delivers multi-stage injection, hop-by-hop redirect tracking, baseline comparison, SSRF defense, client-side JavaScript/Meta-refresh detection, and comprehensive reporting (TXT, HTML, JSON).
 
 ---
 
