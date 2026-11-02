@@ -103,10 +103,10 @@ func PrintError(format string, a ...interface{}) {
 }
 
 func PrintVuln(format string, a ...interface{}) {
-	fmt.Printf(ColorRed+ColorBold+"[!] VULNERABLE: "+ColorReset+format+"\n", a...)
+	fmt.Printf(ColorMagenta+ColorBold+"[redirx] "+ColorRed+ColorBold+"[!] VULNERABLE: "+ColorReset+format+"\n", a...)
 }
 
 func PrintPotential(format string, a ...interface{}) {
-	fmt.Printf(ColorYellow+ColorBold+"[?] POTENTIAL: "+ColorReset+format+"\n", a...)
+	fmt.Printf(ColorMagenta+ColorBold+"[redirx] "+ColorYellow+ColorBold+"[?] POTENTIAL: "+ColorReset+format+"\n", a...)
 }
 

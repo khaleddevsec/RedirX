@@ -13,6 +13,7 @@ import (
 type JSONReportSchema struct {
 	Engine    string             `json:"engine"`
 	Version   string             `json:"version"`
+	Author    string             `json:"author"`
 	Timestamp string             `json:"timestamp"`
 	Summary   models.ScanSummary `json:"summary"`
 	Findings  []models.Finding   `json:"findings"`
@@ -23,6 +24,7 @@ func WriteJSONReport(w io.Writer, summary models.ScanSummary, findings []models.
 	doc := JSONReportSchema{
 		Engine:    "RedirX",
 		Version:   version.Version,
+		Author:    version.Author,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Summary:   summary,
 		Findings:  findings,

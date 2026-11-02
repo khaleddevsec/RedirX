@@ -3,7 +3,7 @@
 
 BINARY_NAME=redirx
 BUILD_DIR=bin
-VERSION?=1.0.0
+VERSION?=3.1.2
 COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
 

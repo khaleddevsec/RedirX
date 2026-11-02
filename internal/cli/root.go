@@ -231,11 +231,13 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	statsColl := stats.NewCollector(len(targets))
 	engine := scanner.NewEngine(scanConfig, client, statsColl)
 
-	// Live finding display handler
+	// Live finding display handler (Nuclei style output formatting)
 	findingHandler := func(f *models.Finding) {
 		if flagSilent {
-			if f.Classification == models.ClassificationConfirmed || f.Classification == models.ClassificationPotential {
-				fmt.Printf("[%s] %s -> %s (param: %s)\n", f.Classification, f.VulnerableURL, f.FinalDestination, f.Parameter)
+			if f.Classification == models.ClassificationConfirmed {
+				fmt.Printf("[redirx] [confirmed] [open-redirect] %s -> %s [param: %s]\n", f.VulnerableURL, f.FinalDestination, f.Parameter)
+			} else if f.Classification == models.ClassificationPotential {
+				fmt.Printf("[redirx] [potential] [open-redirect] %s -> %s [param: %s]\n", f.VulnerableURL, f.FinalDestination, f.Parameter)
 			}
 			return
 		}
@@ -318,8 +320,9 @@ func printBanner(dataDir string, targetCount int) {
    / __ \___  ____/ (_)____ | |/ /
   / /_/ / _ \/ __  / / ___/ |   / 
  / _, _/  __/ /_/ / / /    /   |  
-/_/ |_|\___/\__,_/_/_/    /_/|_|  ` + logger.ColorReset + logger.ColorGray + "v" + version.Version + logger.ColorReset)
-	fmt.Println(" Advanced Open Redirect Detection & Analysis Engine")
+/_/ |_|\___/\__,_/_/_/    /_/|_|  ` + logger.ColorReset + logger.ColorMagenta + "v" + version.Version + logger.ColorReset)
+	fmt.Println(logger.ColorBold + " Advanced Open Redirect Detection & Analysis Engine" + logger.ColorReset)
+	fmt.Println(logger.ColorGreen + " Developer: " + logger.ColorReset + version.Author + " | " + logger.ColorBlue + "https://github.com/khaleddevsec/RedirX" + logger.ColorReset)
 	fmt.Printf(logger.ColorGray+" Data Directory: %s | Active Targets: %d\n\n"+logger.ColorReset, dataDir, targetCount)
 }
 
