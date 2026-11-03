@@ -78,5 +78,25 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# Local testing wordlists
+# Local testing targets, wordlists and outputs
 nrd.txt
+*.lst
+*.urls
+targets.txt
+urls.txt
+sites.txt
+hosts.txt
+scan-*
+
+# Root level text and report dumps (safelist built-in configs)
+/*.txt
+!/configs/*.txt
+/*.html
+/*.json
+/*.csv
+/*.xml
+
+# Databases and local caches
+*.db
+*.sqlite
+*.sqlite3
