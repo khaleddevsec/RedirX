@@ -77,3 +77,6 @@ test-results/
 ehthumbs.db
 Thumbs.db
 desktop.ini
+
+# Local testing wordlists
+nrd.txt
