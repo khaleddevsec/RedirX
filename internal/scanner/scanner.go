@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -13,19 +12,19 @@ import (
 	"redirx/internal/redirect"
 	"redirx/internal/scope"
 	"redirx/internal/stats"
-	"redirx/internal/validator"
 )
 
-// Engine coordinates the multi-threaded scanning process.
+// Engine coordinates the multi-threaded scanning process across pluggable detection techniques.
 type Engine struct {
 	cfg         *models.ScanConfig
 	client      *redirect.Client
 	scope       *scope.ScopeManager
 	rateLimiter *HostRateLimiter
 	stats       *stats.Collector
+	registry    *detector.Registry
 }
 
-// NewEngine constructs a new scanning engine instance.
+// NewEngine constructs a new scanning engine instance with the default technique registry.
 func NewEngine(cfg *models.ScanConfig, client *redirect.Client, statsColl *stats.Collector) *Engine {
 	return &Engine{
 		cfg:         cfg,
@@ -33,33 +32,93 @@ func NewEngine(cfg *models.ScanConfig, client *redirect.Client, statsColl *stats
 		scope:       scope.NewScopeManager(cfg.Allowlist),
 		rateLimiter: NewHostRateLimiter(cfg.Delay),
 		stats:       statsColl,
+		registry:    detector.DefaultRegistry(),
 	}
+}
+
+// WithRegistry sets a custom technique registry on the engine.
+func (e *Engine) WithRegistry(r *detector.Registry) *Engine {
+	if r != nil {
+		e.registry = r
+	}
+	return e
+}
+
+// Execute implements detector.RequestExecutor.
+func (e *Engine) Execute(ctx context.Context, targetURL string) (*redirect.ExecutionResult, error) {
+	e.rateLimiter.Wait(targetURL)
+	e.stats.IncRequests()
+	return e.client.ExecuteHopByHop(ctx, targetURL)
+}
+
+// Wait implements detector.RequestExecutor.
+func (e *Engine) Wait(targetURL string) {
+	e.rateLimiter.Wait(targetURL)
+}
+
+// RecordRequest implements detector.RequestExecutor.
+func (e *Engine) RecordRequest() {
+	e.stats.IncRequests()
+}
+
+// RecordFinding implements detector.RequestExecutor.
+func (e *Engine) RecordFinding(classification models.Classification) {
+	e.stats.AddFinding(classification)
+}
+
+// RecordError implements detector.RequestExecutor.
+func (e *Engine) RecordError(err string) {
+	e.stats.AddError(err)
+}
+
+// IncrementParameters implements detector.RequestExecutor.
+func (e *Engine) IncrementParameters() {
+	e.stats.IncParameters()
 }
 
 // FindingHandler is invoked whenever a relevant finding is generated.
 type FindingHandler func(finding *models.Finding)
 
 // ScanTargets executes scanning concurrently across target URLs using a worker pool.
+// Automatically deduplicates input URLs to avoid redundant requests.
 func (e *Engine) ScanTargets(ctx context.Context, targets []string, handler FindingHandler) ([]models.Finding, error) {
 	var (
 		findings   []models.Finding
 		findingsMu sync.Mutex
 	)
 
+	// Deduplicate and normalize input targets
+	seen := make(map[string]struct{})
+	var uniqueTargets []string
+	for _, t := range targets {
+		normalized := normalizeTargetURL(t)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		uniqueTargets = append(uniqueTargets, normalized)
+	}
+
+	if len(uniqueTargets) == 0 {
+		return nil, nil
+	}
+
+	e.stats.SetTotalTargets(len(uniqueTargets))
+
 	threads := e.cfg.Threads
 	if threads <= 0 {
 		threads = 10
 	}
-	if threads > len(targets) && len(targets) > 0 {
-		threads = len(targets)
+	if threads > len(uniqueTargets) {
+		threads = len(uniqueTargets)
 	}
 
-	targetChan := make(chan string, len(targets))
-	for _, t := range targets {
-		normalized := normalizeTargetURL(t)
-		if normalized != "" {
-			targetChan <- normalized
-		}
+	targetChan := make(chan string, len(uniqueTargets))
+	for _, t := range uniqueTargets {
+		targetChan <- t
 	}
 	close(targetChan)
 
@@ -69,6 +128,8 @@ func (e *Engine) ScanTargets(ctx context.Context, targets []string, handler Find
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
+			e.stats.IncWorker()
+			defer e.stats.DecWorker()
 
 			for {
 				select {
@@ -80,6 +141,7 @@ func (e *Engine) ScanTargets(ctx context.Context, targets []string, handler Find
 					}
 
 					targetFindings := e.scanSingleTarget(ctx, targetURL)
+					e.stats.IncTarget()
 
 					if len(targetFindings) > 0 {
 						findingsMu.Lock()
@@ -100,10 +162,8 @@ func (e *Engine) ScanTargets(ctx context.Context, targets []string, handler Find
 	return findings, nil
 }
 
-// scanSingleTarget executes the full detection pipeline on a single URL.
+// scanSingleTarget executes the decoupled detection pipeline across all enabled techniques.
 func (e *Engine) scanSingleTarget(ctx context.Context, targetURL string) []models.Finding {
-	var targetFindings []models.Finding
-
 	// 1. Verify Scope
 	if !e.scope.IsInScope(targetURL) {
 		if e.cfg.Verbose {
@@ -112,114 +172,25 @@ func (e *Engine) scanSingleTarget(ctx context.Context, targetURL string) []model
 		return nil
 	}
 
-	targetHost := detector.ExtractHost(targetURL)
+	var targetFindings []models.Finding
+	techniques := e.registry.GetEnabled(e.cfg)
 
-	// 2. Optional: Legacy Path Canonicalization Anomaly check
-	if e.cfg.PathTest {
-		e.rateLimiter.Wait(targetURL)
-		e.stats.IncRequests()
-		pathFinding, err := detector.CheckPathCanonicalizationAnomaly(ctx, e.client, targetURL)
-		if err == nil && pathFinding != nil {
-			e.stats.AddFinding(pathFinding.Classification)
-			targetFindings = append(targetFindings, *pathFinding)
-		}
-	}
-
-	// 3. Establish Baseline Response
-	e.rateLimiter.Wait(targetURL)
-	e.stats.IncRequests()
-	baseline, err := detector.CollectBaseline(ctx, e.client, targetURL)
-	if err != nil {
-		if e.cfg.Verbose {
-			logger.PrintError("Baseline failed for %s: %v", targetURL, err)
-		}
-		e.stats.AddError(fmt.Sprintf("Baseline %s: %v", targetURL, err))
-		return targetFindings
-	}
-
-	// 4. Extract Candidate Parameters
-	params, _, err := detector.ExtractCandidateParams(targetURL, e.cfg.IncludeParams, e.cfg.ExcludeParams)
-	if err != nil || len(params) == 0 {
-		return targetFindings
-	}
-
-	// 5. Generate Payloads
-	testDomain := e.cfg.TestDomain
-	if testDomain == "" {
-		testDomain = "example.com"
-	}
-
-	payloads, err := detector.GeneratePayloads(targetHost, testDomain, e.cfg.PayloadFile)
-	if err != nil {
-		e.stats.AddError(fmt.Sprintf("Payload error %s: %v", targetURL, err))
-		return targetFindings
-	}
-
-	// 6. Test Parameters with Payloads
-	for _, param := range params {
+	for _, tech := range techniques {
 		select {
 		case <-ctx.Done():
 			return targetFindings
 		default:
 		}
 
-		e.stats.IncParameters()
-
-		for _, p := range payloads {
-			select {
-			case <-ctx.Done():
-				return targetFindings
-			default:
+		findings, err := tech.Execute(ctx, targetURL, e, e.cfg)
+		if err != nil {
+			if e.cfg.Verbose {
+				logger.PrintError("[%s] error on %s: %v", tech.Name(), targetURL, err)
 			}
-
-			injected, injectErr := detector.InjectQueryParameter(targetURL, param, p.Value, p.Category)
-			if injectErr != nil {
-				continue
-			}
-
-			// Apply rate limit delay before request
-			e.rateLimiter.Wait(injected.URL)
-			e.stats.IncRequests()
-
-			execResult, execErr := e.client.ExecuteHopByHop(ctx, injected.URL)
-			if execErr != nil {
-				// Retries if configured
-				for r := 0; r < e.cfg.Retries; r++ {
-					e.rateLimiter.Wait(injected.URL)
-					e.stats.IncRequests()
-					execResult, execErr = e.client.ExecuteHopByHop(ctx, injected.URL)
-					if execErr == nil {
-						break
-					}
-				}
-				if execErr != nil {
-					continue
-				}
-			}
-
-			// Check client-side navigation (Meta Refresh / JS)
-			clientSide := detector.AnalyzeClientSideRedirects(execResult.FinalBody, testDomain, p.Value)
-
-			// Validate finding
-			finding := validator.ValidateFinding(targetURL, injected, baseline, execResult, clientSide, testDomain)
-			if finding == nil {
-				continue
-			}
-
-			e.stats.AddFinding(finding.Classification)
-
-			// Record Confirmed and Potential findings, and record all if Verbose
-			if finding.Classification == models.ClassificationConfirmed ||
-				finding.Classification == models.ClassificationPotential ||
-				e.cfg.Verbose {
-				targetFindings = append(targetFindings, *finding)
-			}
-
-			// If Confirmed, no need to bombard this parameter with more payloads of the same category
-			if finding.Classification == models.ClassificationConfirmed {
-				break
-			}
+			continue
 		}
+
+		targetFindings = append(targetFindings, findings...)
 	}
 
 	return targetFindings
@@ -243,4 +214,3 @@ func normalizeTargetURL(raw string) string {
 
 	return parsed.String()
 }
-

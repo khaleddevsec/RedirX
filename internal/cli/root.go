@@ -20,6 +20,7 @@ import (
 	"redirx/internal/scanner"
 	"redirx/internal/stats"
 	"redirx/internal/updater"
+	"redirx/internal/ui"
 	"redirx/pkg/version"
 )
 
@@ -28,6 +29,8 @@ var (
 	flagURL           string
 	flagList          string
 	flagStdin         bool
+	flagMode          string
+	flagTicker        bool
 	flagThreads       int
 	flagTimeout       time.Duration
 	flagDelay         time.Duration
@@ -74,6 +77,8 @@ SSRF defense, and comprehensive reporting (TXT, HTML, JSON).`,
 	rootCmd.Flags().StringVarP(&flagURL, "url", "u", "", "Single target URL to test")
 	rootCmd.Flags().StringVarP(&flagList, "list", "l", "", "Path to file containing target URLs (one per line)")
 	rootCmd.Flags().BoolVar(&flagStdin, "stdin", false, "Read target URLs from standard input")
+	rootCmd.Flags().StringVarP(&flagMode, "mode", "m", "fast", "Scan mode: 'fast' (two-stage smart canary probe) or 'deep' (exhaustive payload matrix)")
+	rootCmd.Flags().BoolVar(&flagTicker, "ticker", true, "Display live terminal progress ticker")
 
 	// Concurrency & network tuning
 	rootCmd.Flags().IntVarP(&flagThreads, "threads", "t", 10, "Worker pool concurrency")
@@ -180,6 +185,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		TargetURL:          flagURL,
 		TargetList:         flagList,
 		UseStdin:           flagStdin,
+		Mode:               flagMode,
 		Threads:            flagThreads,
 		Timeout:            flagTimeout,
 		Delay:              flagDelay,
@@ -232,8 +238,16 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	statsColl := stats.NewCollector(len(targets))
 	engine := scanner.NewEngine(scanConfig, client, statsColl)
 
+	tickerEnabled := !flagSilent && isTerminal() && flagTicker
+	ticker := ui.NewProgressTicker(statsColl, tickerEnabled)
+	ticker.Start()
+	defer ticker.Stop()
+
 	// Live finding display handler (Nuclei style output formatting)
 	findingHandler := func(f *models.Finding) {
+		ticker.Clear()
+		defer ticker.Resume()
+
 		if flagSilent {
 			if f.Classification == models.ClassificationConfirmed {
 				fmt.Printf("[redirx] [confirmed] [open-redirect] %s -> %s [param: %s]\n", f.VulnerableURL, f.FinalDestination, f.Parameter)
@@ -252,6 +266,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	// 12. Execute Scan
 	findings, err := engine.ScanTargets(ctx, targets, findingHandler)
+	ticker.Stop()
 	statsColl.Stop()
 	summary := statsColl.Summary()
 

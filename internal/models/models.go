@@ -92,6 +92,22 @@ type BaselineResult struct {
 	IsStaticRedirect bool
 }
 
+// InjectedTarget holds the constructed URL alongside metadata about the injection.
+type InjectedTarget struct {
+	URL             string
+	Parameter       string
+	Payload         string
+	PayloadCategory string
+}
+
+// ClientSideResult contains any detected client-side navigation patterns.
+type ClientSideResult struct {
+	Detected          bool
+	Type              VulnerabilityType
+	TargetDestination string
+	Snippet           string
+}
+
 // ScanSummary aggregates statistical data about a completed scan.
 type ScanSummary struct {
 	StartTime         time.Time     `json:"start_time"`
@@ -107,6 +123,11 @@ type ScanSummary struct {
 	Errors            []string      `json:"errors,omitempty"`
 }
 
+const (
+	ScanModeFast = "fast"
+	ScanModeDeep = "deep"
+)
+
 // ScanConfig holds all operational settings for RedirX.
 type ScanConfig struct {
 	// Targets
@@ -115,6 +136,7 @@ type ScanConfig struct {
 	UseStdin   bool
 
 	// Execution
+	Mode            string // "fast" (default: two-stage canary discovery) or "deep" (exhaustive matrix)
 	Threads         int
 	Timeout         time.Duration
 	Delay           time.Duration

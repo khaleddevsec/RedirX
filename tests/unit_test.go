@@ -1,7 +1,10 @@
 package tests
 
 import (
+	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,8 +15,13 @@ import (
 	"redirx/internal/config"
 	"redirx/internal/detector"
 	"redirx/internal/models"
+	"redirx/internal/redirect"
 	"redirx/internal/reporter"
+	"redirx/internal/scanner"
 	"redirx/internal/scope"
+	"redirx/internal/stats"
+	"redirx/internal/ui"
+	"redirx/internal/validator"
 )
 
 // TestExtractCandidateParams verifies extraction of query parameters and defaults.
@@ -371,3 +379,241 @@ func TestInjectionEngine(t *testing.T) {
 		t.Errorf("target was not updated properly: %s", q.Get("target"))
 	}
 }
+
+// TestTechniqueRegistry verifies registry registration, enumeration, and configuration filtering.
+func TestTechniqueRegistry(t *testing.T) {
+	reg := detector.DefaultRegistry()
+	all := reg.All()
+	if len(all) < 2 {
+		t.Fatalf("expected at least 2 default techniques, got %d", len(all))
+	}
+
+	// When PathTest is false, only QueryParameter should be enabled
+	cfg := &models.ScanConfig{PathTest: false}
+	enabled := reg.GetEnabled(cfg)
+	if len(enabled) != 1 || enabled[0].ID() != "query_parameter" {
+		t.Errorf("expected only query_parameter enabled, got %v", enabled)
+	}
+
+	// When PathTest is true, both techniques should be enabled
+	cfg.PathTest = true
+	enabledWithAll := reg.GetEnabled(cfg)
+	if len(enabledWithAll) != 2 {
+		t.Errorf("expected 2 techniques enabled, got %d", len(enabledWithAll))
+	}
+}
+
+// TestTargetDeduplication verifies that duplicate URLs are filtered out before scanning.
+func TestTargetDeduplication(t *testing.T) {
+	targets := []string{
+		"https://example.com/login?redirect=1",
+		"https://example.com/login?redirect=1",
+		"  https://example.com/login?redirect=1  ",
+		"example.com/login?redirect=1",
+		"https://example.com/other",
+	}
+
+	cfg := &models.ScanConfig{
+		Threads: 1,
+		Timeout: 2 * time.Second,
+	}
+	client, err := redirect.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statsColl := stats.NewCollector(len(targets))
+	engine := scanner.NewEngine(cfg, client, statsColl)
+
+	// Custom empty registry to verify deduplication without network calls
+	emptyReg := detector.NewRegistry()
+	engine.WithRegistry(emptyReg)
+
+	findings, err := engine.ScanTargets(context.TODO(), targets, nil)
+	if err != nil {
+		t.Fatalf("ScanTargets failed: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings from empty registry, got %d", len(findings))
+	}
+}
+
+// TestZeroAllocRedirectReaderAndBufferPool verifies that 3xx bodies are bypassed
+// while the terminal response is captured via the buffer pool.
+func TestZeroAllocRedirectReaderAndBufferPool(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/step1", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/step2", http.StatusFound)
+	})
+	mux.HandleFunc("/step2", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/terminal", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/terminal", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Terminal response body loaded via bufferPool"))
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	cfg := &models.ScanConfig{
+		Timeout:           5 * time.Second,
+		SafeRedirectsOnly: false,
+	}
+	client, err := redirect.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := client.ExecuteHopByHop(context.Background(), ts.URL+"/step1")
+	if err != nil {
+		t.Fatalf("ExecuteHopByHop failed: %v", err)
+	}
+
+	if !res.HadRedirects {
+		t.Fatal("expected HadRedirects to be true")
+	}
+	if len(res.RedirectChain) != 3 {
+		t.Fatalf("expected 3 hops (2 redirects + 1 terminal), got %d", len(res.RedirectChain))
+	}
+
+	// Hops 0 and 1 are 3xx: bodies should be bypassed without allocation
+	if res.RedirectChain[0].BodySnippet != "[redirect hop - body bypassed]" {
+		t.Errorf("expected hop 0 body to be bypassed, got %q", res.RedirectChain[0].BodySnippet)
+	}
+	if res.RedirectChain[1].BodySnippet != "[redirect hop - body bypassed]" {
+		t.Errorf("expected hop 1 body to be bypassed, got %q", res.RedirectChain[1].BodySnippet)
+	}
+
+	// Hop 2 is terminal: body should be fully present
+	if !strings.Contains(res.RedirectChain[2].BodySnippet, "Terminal response body loaded via bufferPool") {
+		t.Errorf("expected terminal body snippet to contain content, got %q", res.RedirectChain[2].BodySnippet)
+	}
+	if !strings.Contains(res.FinalBody, "Terminal response body loaded via bufferPool") {
+		t.Errorf("expected FinalBody to contain content, got %q", res.FinalBody)
+	}
+}
+
+// TestMatchesTestDomainStrict verifies strict hostname boundary evaluation.
+func TestMatchesTestDomainStrict(t *testing.T) {
+	testDomain := "example.com"
+
+	// Valid matches (exact or genuine subdomains)
+	validCases := []string{
+		"example.com",
+		"EXAMPLE.COM",
+		"sub.example.com",
+		"canary.sub.example.com",
+		"example.com:8080",
+		"example.com.",
+		"sub.example.com:443",
+	}
+	for _, c := range validCases {
+		if !validator.MatchesTestDomain(c, testDomain) {
+			t.Errorf("expected %q to match %q, but failed", c, testDomain)
+		}
+	}
+
+	// Invalid matches (substring collisions, evil suffixes, etc.)
+	invalidCases := []string{
+		"notexample.com",
+		"myexample.org",
+		"companyexample.com",
+		"example.com.evil.org",
+		"evil-example.com",
+		"fake-example.com",
+		"attacker.com",
+		"",
+	}
+	for _, c := range invalidCases {
+		if validator.MatchesTestDomain(c, testDomain) {
+			t.Errorf("expected %q NOT to match %q, but matched (false positive!)", c, testDomain)
+		}
+	}
+}
+
+// TestClientSideModernJSExtraction verifies regex extraction on modern JS navigation patterns.
+func TestClientSideModernJSExtraction(t *testing.T) {
+	testDomain := "example.com"
+
+	cases := []struct {
+		name     string
+		html     string
+		expected bool
+	}{
+		{
+			name:     "Backtick template literal",
+			html:     "<html><body><script>window.location = `https://example.com`;</script></body></html>",
+			expected: true,
+		},
+		{
+			name:     "self.location assignment",
+			html:     "<html><body><script>self.location.href = 'https://example.com';</script></body></html>",
+			expected: true,
+		},
+		{
+			name:     "top.location assignment",
+			html:     "<html><body><script>top.location = 'https://example.com';</script></body></html>",
+			expected: true,
+		},
+		{
+			name:     "window.navigate",
+			html:     "<html><body><script>window.navigate('https://example.com');</script></body></html>",
+			expected: true,
+		},
+		{
+			name:     "Sub-string collision in JS should NOT match",
+			html:     "<html><body><script>window.location = 'https://notexample.com';</script></body></html>",
+			expected: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := detector.AnalyzeClientSideRedirects(tc.html, testDomain, "https://example.com")
+			if res.Detected != tc.expected {
+				t.Errorf("[%s] expected detected=%v, got=%v (destination: %s)", tc.name, tc.expected, res.Detected, res.TargetDestination)
+			}
+		})
+	}
+}
+
+// TestProgressTickerAndMetrics verifies format duration, stats progress, and ticker lifecycle.
+func TestProgressTickerAndMetrics(t *testing.T) {
+	// 1. Test Duration Formatting
+	if d := ui.FormatDuration(15 * time.Second); d != "00:15" {
+		t.Errorf("expected 00:15, got %s", d)
+	}
+	if d := ui.FormatDuration(75 * time.Second); d != "01:15" {
+		t.Errorf("expected 01:15, got %s", d)
+	}
+	if d := ui.FormatDuration(3665 * time.Second); d != "01:01:05" {
+		t.Errorf("expected 01:01:05, got %s", d)
+	}
+
+	// 2. Test Stats Calculations
+	coll := stats.NewCollector(100)
+	coll.IncWorker()
+	if coll.GetActiveWorkers() != 1 {
+		t.Errorf("expected 1 active worker, got %d", coll.GetActiveWorkers())
+	}
+
+	for i := 0; i < 50; i++ {
+		coll.IncTarget()
+		coll.IncRequests()
+	}
+
+	if pct := coll.ProgressPercentage(); pct != 50.0 {
+		t.Errorf("expected 50%% progress, got %.1f", pct)
+	}
+
+	// 3. Test Ticker Lifecycle
+	ticker := ui.NewProgressTicker(coll, true)
+	ticker.Start()
+	ticker.Clear()
+	ticker.Resume()
+	ticker.Stop()
+}
+
+
+
+

@@ -19,6 +19,10 @@ func main() {
 			os.Args[i] = "--name"
 		case "-format":
 			os.Args[i] = "--format"
+		case "-mode":
+			os.Args[i] = "--mode"
+		case "-ticker":
+			os.Args[i] = "--ticker"
 		case "-output":
 			os.Args[i] = "--output"
 		case "-version":

@@ -4,15 +4,12 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"redirx/internal/models"
 )
 
 // InjectedTarget holds the constructed URL alongside metadata about the injection.
-type InjectedTarget struct {
-	URL             string
-	Parameter       string
-	Payload         string
-	PayloadCategory string
-}
+type InjectedTarget = models.InjectedTarget
 
 // InjectQueryParameter replaces or adds a parameter value in the target URL.
 // It preserves all existing query parameters without corrupting values.

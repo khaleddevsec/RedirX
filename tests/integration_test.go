@@ -106,6 +106,38 @@ func setupMockVulnerableServer() *httptest.Server {
 		http.Redirect(w, r, "http://127.0.0.1:8080/admin", http.StatusFound)
 	})
 
+	// 11. Clean static endpoint: completely ignores all parameters (returns 200 OK)
+	mux.HandleFunc("/static-clean", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Completely clean static landing page"))
+	})
+
+	// 12. Evasion endpoint: returns 400 on "https://" but vulnerable to protocol-relative "//"
+	mux.HandleFunc("/filter-bypass", func(w http.ResponseWriter, r *http.Request) {
+		dest := r.URL.Query().Get("dest")
+		if dest == "" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Ready for input"))
+			return
+		}
+		if strings.HasPrefix(dest, "http://") || strings.HasPrefix(dest, "https://") {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Absolute schemes are forbidden"))
+			return
+		}
+		if strings.HasPrefix(dest, "//") {
+			http.Redirect(w, r, dest, http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Default safe"))
+	})
+
+	// 13. Sub-string domain collision: redirects to notexample.com (must NOT be flagged as example.com!)
+	mux.HandleFunc("/collision-hazard", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://notexample.com/oauth/return", http.StatusFound)
+	})
+
 	return httptest.NewServer(mux)
 }
 
@@ -477,3 +509,145 @@ func TestIntegrationLegacyPathSegmentAnomaly(t *testing.T) {
 		t.Errorf("expected VulnPathCanonical, got %s", finding.VulnerabilityType)
 	}
 }
+
+// TestIntegrationFastModeRequestReduction verifies that Fast Mode drastically cuts requests on inert URLs.
+func TestIntegrationFastModeRequestReduction(t *testing.T) {
+	ts := setupMockVulnerableServer()
+	defer ts.Close()
+
+	targetURL := ts.URL + "/static-clean"
+
+	// 1. Scan in Fast Mode (default)
+	cfgFast := &models.ScanConfig{
+		TargetURL:         targetURL,
+		Mode:              models.ScanModeFast,
+		Timeout:           5 * time.Second,
+		TestDomain:        "example.com",
+		SafeRedirectsOnly: false,
+	}
+	clientFast, _ := redirect.NewClient(cfgFast)
+	statsFast := stats.NewCollector(1)
+	engineFast := scanner.NewEngine(cfgFast, clientFast, statsFast)
+
+	_, err := engineFast.ScanTargets(context.Background(), []string{targetURL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fastRequests := statsFast.GetTotalRequests()
+
+	// 2. Scan in Deep Mode
+	cfgDeep := &models.ScanConfig{
+		TargetURL:         targetURL,
+		Mode:              models.ScanModeDeep,
+		Timeout:           5 * time.Second,
+		TestDomain:        "example.com",
+		SafeRedirectsOnly: false,
+	}
+	clientDeep, _ := redirect.NewClient(cfgDeep)
+	statsDeep := stats.NewCollector(1)
+	engineDeep := scanner.NewEngine(cfgDeep, clientDeep, statsDeep)
+
+	_, err = engineDeep.ScanTargets(context.Background(), []string{targetURL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepRequests := statsDeep.GetTotalRequests()
+
+	// Fast Mode should use 1 baseline + 38 canary probes = 39 requests.
+	// Deep Mode should use 1 baseline + 38 * 19 payloads = 723 requests.
+	if fastRequests >= deepRequests {
+		t.Fatalf("expected Fast Mode requests (%d) to be far less than Deep Mode (%d)", fastRequests, deepRequests)
+	}
+	if fastRequests > 50 {
+		t.Errorf("expected Fast Mode requests <= 50 on inert URL, got %d", fastRequests)
+	}
+	if deepRequests < 700 {
+		t.Errorf("expected Deep Mode requests >= 700, got %d", deepRequests)
+	}
+}
+
+// TestIntegrationCanaryStageTwoEvasion verifies that responsive parameters (e.g. status code shift)
+// trigger Stage 2 evasion and confirm bypasses like protocol-relative redirects.
+func TestIntegrationCanaryStageTwoEvasion(t *testing.T) {
+	ts := setupMockVulnerableServer()
+	defer ts.Close()
+
+	testDomain := "example.com"
+	targetURL := ts.URL + "/filter-bypass"
+
+	cfg := &models.ScanConfig{
+		TargetURL:         targetURL,
+		Mode:              models.ScanModeFast, // Even in Fast Mode, responsive parameter should trigger Stage 2!
+		IncludeParams:     []string{"dest"},
+		Timeout:           5 * time.Second,
+		TestDomain:        testDomain,
+		SafeRedirectsOnly: false,
+	}
+
+	client, err := redirect.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	statsColl := stats.NewCollector(1)
+	engine := scanner.NewEngine(cfg, client, statsColl)
+
+	findings, err := engine.ScanTargets(context.Background(), []string{targetURL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foundConfirmed := false
+	for _, f := range findings {
+		if f.Classification == models.ClassificationConfirmed && strings.Contains(f.FinalDestination, testDomain) {
+			foundConfirmed = true
+			if !strings.HasPrefix(f.Payload, "//") {
+				t.Errorf("expected protocol-relative evasion payload, got %s", f.Payload)
+			}
+			break
+		}
+	}
+
+	if !foundConfirmed {
+		t.Fatalf("expected responsive parameter to trigger Stage 2 evasion and CONFIRM, got: %+v", findings)
+	}
+}
+
+// TestIntegrationDomainCollisionElimination verifies that redirects to notexample.com
+// are NOT flagged as genuine Open Redirects when testing against example.com.
+func TestIntegrationDomainCollisionElimination(t *testing.T) {
+	ts := setupMockVulnerableServer()
+	defer ts.Close()
+
+	testDomain := "example.com"
+	targetURL := ts.URL + "/collision-hazard?next=default"
+
+	cfg := &models.ScanConfig{
+		TargetURL:         targetURL,
+		Timeout:           5 * time.Second,
+		TestDomain:        testDomain,
+		SafeRedirectsOnly: false,
+	}
+
+	client, err := redirect.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	statsColl := stats.NewCollector(1)
+	engine := scanner.NewEngine(cfg, client, statsColl)
+
+	findings, err := engine.ScanTargets(context.Background(), []string{targetURL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Must NOT find any CONFIRMED Open Redirect pointing to notexample.com
+	for _, f := range findings {
+		if f.Classification == models.ClassificationConfirmed {
+			t.Fatalf("FALSE POSITIVE DETECTED: %s was erroneously confirmed as an Open Redirect to %s", f.FinalDestination, testDomain)
+		}
+	}
+}
+
+

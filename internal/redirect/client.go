@@ -1,6 +1,7 @@
 package redirect
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"redirx/internal/models"
@@ -18,6 +20,14 @@ import (
 var (
 	ErrMaxRedirectsExceeded = errors.New("maximum redirect depth exceeded")
 	ErrCircularRedirect     = errors.New("circular redirect loop detected")
+
+	// bufferPool reuses byte buffers for terminal response body reading
+	// to avoid repetitive heap allocation under high concurrency.
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
 )
 
 // Client wraps an HTTP client and provides hop-by-hop inspection.
@@ -55,14 +65,28 @@ func NewClient(cfg *models.ScanConfig) (*Client, error) {
 		MinVersion:         tls.VersionTLS12,
 	}
 
+	maxIdleConns := 100
+	maxIdleConnsPerHost := 10
+	if cfg.Threads > 0 {
+		maxIdleConns = cfg.Threads * 10
+		maxIdleConnsPerHost = cfg.Threads
+	}
+	if maxIdleConns < 100 {
+		maxIdleConns = 100
+	}
+	if maxIdleConnsPerHost < 10 {
+		maxIdleConnsPerHost = 10
+	}
+
 	transport := &http.Transport{
 		DialContext:           scope.NewSafeDialContext(timeout, cfg.SafeRedirectsOnly),
 		TLSClientConfig:       tlsConfig,
 		ResponseHeaderTimeout: timeout,
 		IdleConnTimeout:       30 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
+		MaxIdleConns:          maxIdleConns,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		DisableKeepAlives:     false,
+		DisableCompression:   false,
 	}
 
 	if cfg.ProxyURL != "" {
@@ -199,26 +223,8 @@ func (c *Client) ExecuteHopByHop(ctx context.Context, targetURL string) (*Execut
 			return result, nil
 		}
 
-		// Read response body safely with size limit
-		limitedReader := io.LimitReader(resp.Body, c.maxResponseSize)
-		bodyBytes, readErr := io.ReadAll(limitedReader)
-		_ = resp.Body.Close()
-
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			hop := models.RedirectHop{
-				HopNumber:  hopCount,
-				URL:        currentURL,
-				StatusCode: resp.StatusCode,
-				Error:      readErr.Error(),
-			}
-			chain = append(chain, hop)
-			result.RedirectChain = chain
-			result.Error = readErr
-			return result, nil
-		}
-
-		bodyStr := string(bodyBytes)
 		locHeader := resp.Header.Get("Location")
+		isRedirectStatus := resp.StatusCode >= 300 && resp.StatusCode < 400
 
 		hopHeaderMap := make(map[string]string)
 		for k, v := range resp.Header {
@@ -227,30 +233,28 @@ func (c *Client) ExecuteHopByHop(ctx context.Context, targetURL string) (*Execut
 			}
 		}
 
-		snippet := bodyStr
-		if len(snippet) > 500 {
-			snippet = snippet[:500] + "... [truncated]"
-		}
-
-		hop := models.RedirectHop{
-			HopNumber:      hopCount,
-			URL:            currentURL,
-			StatusCode:     resp.StatusCode,
-			LocationHeader: locHeader,
-			Headers:        hopHeaderMap,
-			BodySnippet:    snippet,
-		}
-
 		result.FinalStatus = resp.StatusCode
 		result.FinalURL = currentURL
-		result.FinalBody = bodyStr
 		result.FinalHeaders = resp.Header
 
-		// Determine if this is a redirect status (301, 302, 303, 307, 308)
-		isRedirectStatus := resp.StatusCode >= 300 && resp.StatusCode < 400
-
 		if isRedirectStatus && locHeader != "" {
+			// ZERO-ALLOCATION 3xx REDIRECT READER:
+			// For intermediate redirect hops, discard the body safely so that the underlying
+			// TCP/TLS connection can be returned to net/http's keep-alive connection pool
+			// without allocating and converting multi-megabyte response buffers into strings.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+
 			result.HadRedirects = true
+
+			hop := models.RedirectHop{
+				HopNumber:      hopCount,
+				URL:            currentURL,
+				StatusCode:     resp.StatusCode,
+				LocationHeader: locHeader,
+				Headers:        hopHeaderMap,
+				BodySnippet:    "[redirect hop - body bypassed]",
+			}
 
 			// Resolve relative redirect against current URL
 			baseParsed, parseErr := url.Parse(currentURL)
@@ -273,15 +277,55 @@ func (c *Client) ExecuteHopByHop(ctx context.Context, targetURL string) (*Execut
 			hop.DestinationURL = destinationStr
 			chain = append(chain, hop)
 
-			// Next hop
+			// Advance to next hop
 			currentURL = destinationStr
 			result.FinalURL = currentURL
-		} else {
-			// Terminal response (200, 404, 500, etc.)
+			continue
+		}
+
+		// TERMINAL RESPONSE (200 OK, 404, 500, etc.)
+		// Read terminal response body using sync.Pool buffer to prevent GC heap pressure.
+		buf := bufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		limitedReader := io.LimitReader(resp.Body, c.maxResponseSize)
+		_, readErr := buf.ReadFrom(limitedReader)
+		_ = resp.Body.Close()
+
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			bufferPool.Put(buf)
+			hop := models.RedirectHop{
+				HopNumber:  hopCount,
+				URL:        currentURL,
+				StatusCode: resp.StatusCode,
+				Error:      readErr.Error(),
+			}
 			chain = append(chain, hop)
 			result.RedirectChain = chain
+			result.Error = readErr
 			return result, nil
 		}
+
+		bodyStr := buf.String()
+		bufferPool.Put(buf)
+
+		snippet := bodyStr
+		if len(snippet) > 500 {
+			snippet = snippet[:500] + "... [truncated]"
+		}
+
+		hop := models.RedirectHop{
+			HopNumber:      hopCount,
+			URL:            currentURL,
+			StatusCode:     resp.StatusCode,
+			LocationHeader: locHeader,
+			Headers:        hopHeaderMap,
+			BodySnippet:    snippet,
+		}
+
+		result.FinalBody = bodyStr
+		chain = append(chain, hop)
+		result.RedirectChain = chain
+		return result, nil
 	}
 
 	result.RedirectChain = chain

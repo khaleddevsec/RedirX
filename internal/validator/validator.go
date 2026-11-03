@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"redirx/internal/detector"
 	"redirx/internal/models"
 	"redirx/internal/redirect"
 )
@@ -15,10 +14,10 @@ import (
 // to produce a rigorously verified, evidence-backed Finding.
 func ValidateFinding(
 	originalURL string,
-	injected *detector.InjectedTarget,
+	injected *models.InjectedTarget,
 	baseline *models.BaselineResult,
 	execResult *redirect.ExecutionResult,
-	clientSide *detector.ClientSideResult,
+	clientSide *models.ClientSideResult,
 	testDomain string,
 ) *models.Finding {
 	if injected == nil || execResult == nil {
@@ -78,7 +77,7 @@ func ValidateFinding(
 			if destParsed != nil {
 				h = strings.ToLower(destParsed.Hostname())
 			}
-			if strings.Contains(h, cleanDomain) {
+			if MatchesTestDomain(h, cleanDomain) {
 				matchedHop = hop
 				destHost = h
 				break
@@ -86,7 +85,7 @@ func ValidateFinding(
 			// Also check if Location header is an absolute or protocol-relative URI with matching host
 			if locParsed, err := url.Parse(hop.LocationHeader); err == nil && locParsed.Host != "" {
 				locHost := strings.ToLower(locParsed.Hostname())
-				if strings.Contains(locHost, cleanDomain) {
+				if MatchesTestDomain(locHost, cleanDomain) {
 					matchedHop = hop
 					destHost = locHost
 					break
@@ -96,7 +95,7 @@ func ValidateFinding(
 
 		if matchedHop == nil {
 			finalParsed, _ := url.Parse(execResult.FinalURL)
-			if finalParsed != nil && strings.Contains(strings.ToLower(finalParsed.Hostname()), cleanDomain) {
+			if finalParsed != nil && MatchesTestDomain(finalParsed.Hostname(), cleanDomain) {
 				matchedHop = &execResult.RedirectChain[len(execResult.RedirectChain)-1]
 				destHost = strings.ToLower(finalParsed.Hostname())
 			}
@@ -204,6 +203,40 @@ func isSameOrigin(hostA, hostB string) bool {
 	}
 
 	if cleanA == cleanB {
+		return true
+	}
+
+	return false
+}
+
+// MatchesTestDomain verifies that host strictly equals testDomain or is a genuine subdomain of testDomain.
+// It prevents false positives caused by substring domain collisions (e.g. notexample.com vs example.com).
+func MatchesTestDomain(host, testDomain string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	testDomain = strings.ToLower(strings.TrimSpace(testDomain))
+
+	if host == "" || testDomain == "" {
+		return false
+	}
+
+	// Strip port if present
+	if strings.Contains(host, ":") {
+		host = strings.Split(host, ":")[0]
+	}
+	if strings.Contains(testDomain, ":") {
+		testDomain = strings.Split(testDomain, ":")[0]
+	}
+
+	// Strip trailing dot if present
+	host = strings.TrimSuffix(host, ".")
+	testDomain = strings.TrimSuffix(testDomain, ".")
+
+	if host == testDomain {
+		return true
+	}
+
+	// Subdomain match (e.g. sub.example.com or canary.example.com)
+	if strings.HasSuffix(host, "."+testDomain) {
 		return true
 	}
 

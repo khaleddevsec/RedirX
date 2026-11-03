@@ -1,5 +1,5 @@
-# RedirX 🚀
-### Advanced Open Redirect Detection & Analysis Engine
+# RedirX
+### Advanced Open Redirect Detection and Analysis Engine
 
 [![CI](https://github.com/khaleddevsec/RedirX/actions/workflows/ci.yml/badge.svg)](https://github.com/khaleddevsec/RedirX/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/khaleddevsec/RedirX)](https://goreportcard.com/report/github.com/khaleddevsec/RedirX)
@@ -7,42 +7,49 @@
 [![Release](https://img.shields.io/badge/Release-v3.1.2-emerald.svg)](https://github.com/khaleddevsec/RedirX/releases)
 [![Developer](https://img.shields.io/badge/Developer-khaleddevsec-indigo.svg)](https://github.com/khaleddevsec)
 
-**RedirX** is an advanced, high-performance, evidence-based CLI security tool developed by **khaleddevsec ([@khaleddevsec](https://github.com/khaleddevsec))** and written in idiomatic Go. Engineered to detect, validate, and analyze Open Redirect vulnerabilities ([CWE-601](https://cwe.mitre.org/data/definitions/601.html)), RedirX delivers multi-stage injection, hop-by-hop redirect tracking, baseline comparison, SSRF defense, client-side JavaScript/Meta-refresh detection, and comprehensive reporting (TXT, HTML, JSON).
+**RedirX** is an advanced, high-performance, evidence-based CLI security tool developed by **Md. Khaledul Islam ([@khaleddevsec](https://github.com/khaleddevsec))** in idiomatic Go. Designed for application security research, vulnerability auditing, and bug bounty automation, RedirX serves as a specialized practical learning tool for students at **Arena Web Security** to analyze and detect Open Redirect vulnerabilities ([CWE-601](https://cwe.mitre.org/data/definitions/601.html)).
+
+RedirX delivers two-stage injection, hop-by-hop redirect tracking, baseline comparison, SSRF defense, client-side JavaScript and Meta-refresh detection, real-time terminal metrics, and comprehensive multi-format reporting (TXT, HTML, JSON).
 
 ---
 
-## 1. Evolution & Technical Improvements
+## 1. Evolution and Technical Improvements
 
-Before architecting RedirX in Go, a deep technical evaluation of traditional open-redirect detection scripts and basic heuristics was conducted:
+Before architecting RedirX in Go, a technical evaluation of traditional open-redirect detection scripts and basic heuristics was conducted:
 
-### Limitations of Basic/Legacy URL Heuristics
-1. **Misclassification of Vulnerability**: Many basic scripts only strip path segments or check if `/a/` redirects to `/a/b` on the same origin. That is an internal path canonicalization anomaly, **not an Open Redirect** (CWE-601). CWE-601 requires that attacker-controlled user input redirects a visitor to an untrusted external origin.
-2. **Blind Redirect Following**: Standard libraries like Python `requests.get(allow_redirects=True)` follow up to 30 redirects blindly without recording intermediate hops, status codes, or `Location` headers.
-3. **Zero SSRF Protection**: Blind redirect following allows targets redirecting to internal RFC 1918 addresses, loopback (`127.0.0.1`), link-local, or cloud metadata endpoints (`169.254.169.254`) to be accessed blindly.
-4. **No Client-Side Evaluation**: Common tools completely miss HTML Meta Refresh (`<meta http-equiv="refresh">`) and client-side JavaScript navigation (`window.location = ...`).
-5. **Rigid Output & Performance**: Lack of structured formats (JSON, HTML) and synchronous single-threaded bottlenecks.
+### Limitations of Basic Legacy Heuristics
+1. **Vulnerability Misclassification**: Many traditional scripts only strip path segments or check if `/a/` redirects to `/a/b` on the same origin. That is an internal path canonicalization anomaly, not an Open Redirect (CWE-601). CWE-601 requires that attacker-controlled user input redirects a visitor to an untrusted external origin.
+2. **Blind Redirect Following**: Standard libraries follow up to 30 redirects blindly without recording intermediate hops, status codes, or `Location` headers.
+3. **Zero SSRF Protection**: Blind redirect following allows targets redirecting to internal RFC 1918 addresses, loopback (`127.0.0.1`), link-local, or cloud metadata endpoints (`169.254.169.254`) to be probed without safeguard.
+4. **No Client-Side Evaluation**: Common tools miss HTML Meta Refresh (`<meta http-equiv="refresh">`) and client-side JavaScript navigation (`window.location = ...`).
+5. **High Request Churn**: Testing 38 parameters with 19 payloads on unparameterized URLs causes 722 requests per URL. RedirX introduces a two-stage Canary probe to cut redundant requests by over 94%.
 
-### Architectural Improvement Matrix
+### Architectural Comparison Matrix
 
 | Capability / Logic | Legacy Heuristic Scripts | RedirX (Go Implementation) | Status |
 | :--- | :--- | :--- | :--- |
 | **Runtime Dependency** | Python / Interpreter required | Standalone compiled Go binary (Zero external dependencies) | **Engineered in Go** |
-| **Interface** | Desktop GUI / Basic scripts | Modern POSIX CLI with Cobra, flags, and subcommands | **Production Standard** |
-| **Parameter Injection Engine** | ❌ None | Discovers & injects 35+ candidate parameters + custom lists | **Enterprise Grade** |
-| **Multi-Vector Payload Suite** | ❌ None | Protocol-relative, backslash, authority `@`, dot-segment, encoding | **Enterprise Grade** |
+| **Interface** | Desktop GUI / Basic scripts | POSIX CLI with Cobra, flags, and subcommands | **Production Standard** |
+| **Scanning Engine** | Monolithic execution | Pluggable `DetectionTechnique` interface & `Registry` | **Modular Architecture** |
+| **Two-Stage Scanning** | Unsupported | Fast Mode Canary Probing (94% traffic reduction) vs Deep Mode | **Optimized Throughput** |
+| **Parameter Injection Engine** | Unsupported | Discovers and injects 38+ candidate parameters + custom lists | **Enterprise Grade** |
+| **Multi-Vector Payload Suite** | Unsupported | Protocol-relative, backslash, authority `@`, dot-segment, encoding | **Enterprise Grade** |
 | **Redirect Analysis** | Blind following | Hop-by-hop tracing, loop detection, status inspection | **Hardened Engine** |
-| **Baseline Comparison** | ❌ None | Compares unmodified baseline response with injected response | **Zero False-Positive Focus** |
-| **SSRF & Private IP Guard** | ❌ None | Per-hop DNS resolution & connection-time IP validation (Anti-rebinding) | **Built-in Security** |
-| **Client-Side Redirection** | ❌ None | Regex & HTML analysis for Meta refresh & `window.location` JS | **Built-in Security** |
+| **Host Boundary Matching** | Substring checks | Strict host and subdomain verification (`MatchesTestDomain`) | **Zero False-Positive Focus** |
+| **Baseline Comparison** | Unsupported | Compares unmodified baseline response with injected response | **Zero False-Positive Focus** |
+| **Memory Management** | Full body buffering | Zero-allocation 3xx reader and `sync.Pool` buffer reuse | **High Concurrency** |
+| **SSRF & Private IP Guard** | Unsupported | Per-hop DNS resolution & connection-time IP validation | **Built-in Security** |
+| **Client-Side Redirection** | Unsupported | Regex and HTML analysis for Meta refresh & SPA `window.location` | **Built-in Security** |
 | **Path Segment Analysis** | Basic stripping | Preserved and enhanced as optional heuristic (`--path-test`) | **Accurately Isolated** |
+| **Live Terminal Feedback** | Basic logs | Non-interfering real-time progress ticker (req/s, ETA, findings) | **Real-Time Visibility** |
 | **Output Formats** | Plaintext only | TXT, Interactive HTML (embedded styling), and JSON | **Multi-Format** |
 | **Data Directory** | Unstructured | Predictable user data hierarchy (`~/RedirX/` results, reports, logs) | **Organized** |
 | **Concurrency & Workers** | Single-threaded sequential | Worker pool with goroutines, channels, and per-host rate limiting | **High Throughput** |
-| **Self-Update** | ❌ None | `redirx update` with GitHub Releases & SHA-256 verification | **Built-in Automation** |
+| **Self-Update** | Unsupported | `redirx update` with GitHub Releases & SHA-256 verification | **Built-in Automation** |
 
 ---
 
-## 2. Architecture & Design Principles
+## 2. Architecture and Design Principles
 
 RedirX is structured into clean, modular Go packages under `internal/` and `pkg/`:
 
@@ -52,25 +59,26 @@ RedirX/
 │   └── redirx/            # CLI entry point (main.go)
 ├── internal/
 │   ├── cli/               # Cobra commands: root, version, update, config, results
-│   ├── config/            # Data directory paths (~/RedirX) & overwrite protection
-│   ├── detector/          # URL/param parser, payload generator, injection, clientside, path analyzer
+│   ├── config/            # Data directory paths (~/RedirX) and overwrite protection
+│   ├── detector/          # Pluggable techniques: query parameter, path analyzer, client-side DOM
 │   ├── logger/            # log/slog structured logging with console formatting
-│   ├── models/            # Domain models: Finding, RedirectHop, Evidence, ScanSummary, ScanConfig
-│   ├── redirect/          # Safe HTTP client, SSRF-guarded transport, hop-by-hop execution
+│   ├── models/            # Core data contracts: Finding, RedirectHop, Evidence, ScanSummary, ScanConfig
+│   ├── redirect/          # Safe HTTP client, SSRF-guarded transport, 3xx zero-alloc hop-by-hop execution
 │   ├── reporter/          # Multi-format report generators (TXT, HTML, JSON)
-│   ├── scanner/           # Worker pool orchestrator & per-host rate limiting
-│   ├── scope/             # Allowlist scoping & CIDR/SSRF/cloud metadata validation
+│   ├── scanner/           # Worker pool orchestrator, deduplication, and per-host rate limiting
+│   ├── scope/             # Allowlist scoping and CIDR/SSRF/cloud metadata validation
 │   ├── stats/             # Thread-safe atomic metrics collector
-│   ├── updater/           # GitHub release checker with SHA-256 validation & atomic rollback
-│   └── validator/         # Evidence-based classification & false positive filtering
+│   ├── ui/                # Real-time non-interfering terminal progress ticker
+│   ├── updater/           # GitHub release checker with SHA-256 validation and atomic rollback
+│   └── validator/         # Strict domain matching, evidence-based classification, and false positive filtering
 ├── pkg/
 │   └── version/           # Version strings and build metadata
 ├── configs/
 │   ├── payloads.txt       # Customizable payload templates
 │   └── parameters.txt     # Candidate redirect parameters wordlist
 ├── tests/
-│   ├── unit_test.go       # Unit tests for parsing, SSRF, payloads, reports
-│   └── integration_test.go# Local httptest integration scenarios (10+ test cases)
+│   ├── unit_test.go       # Unit tests for parsing, SSRF, payloads, reports, ticker
+│   └── integration_test.go# Local httptest integration scenarios (28 test cases)
 ├── .github/
 │   └── workflows/ci.yml   # GitHub Actions CI for AMD64 and ARM64
 ├── .goreleaser.yaml       # Cross-platform release packaging
@@ -101,9 +109,9 @@ RedirX maintains an isolated, predictable user data directory. It never writes t
 
 ---
 
-## 4. Detection & Validation Engine
+## 4. Detection and Validation Engine
 
-RedirX does not blindly assume that an HTTP 301 or 302 code represents a vulnerability. Findings are verified through a multi-stage validation pipeline:
+RedirX verifies findings through a multi-stage validation pipeline:
 
 ### Finding Classifications
 
@@ -115,33 +123,34 @@ RedirX does not blindly assume that an HTTP 301 or 302 code represents a vulnera
 ### Payload Categories
 
 RedirX tests an array of parser and filter evasion vectors against each parameter:
-1. **Standard Absolute**: `https://example.com`, `http://example.com`
-2. **Protocol-Relative**: `//example.com`, `///example.com`, `////example.com`
-3. **Backslash Obfuscation**: `/\example.com`, `\/example.com`, `\\example.com`
-4. **Authority & Userinfo Bypasses**: `https://target.com@example.com`, `https://example.com#@target.com`
-5. **Dot-Segment Traversal**: `/../example.com`, `/%2e%2e/example.com`
-6. **URL & Double Encoding**: `%2f%2fexample.com`, `%252f%252fexample.com`
-7. **Termination Bypasses**: `https://example.com%00`, `https://example.com/.`
+1. **Standard Absolute**: `https://example.com`, `http://example.com`, `hTTps://example.com`
+2. **Protocol-Relative**: `//example.com`, `///example.com`, `////example.com`, `/.//example.com`
+3. **Backslash Obfuscation**: `/\example.com`, `\/example.com`, `\\example.com`, `/\\/example.com`
+4. **Authority and Userinfo Bypasses**: `https://target.com@example.com`, `https://example.com#@target.com`
+5. **Dot-Segment Traversal**: `/../example.com`, `/%2e%2e/example.com`, `/..//example.com`
+6. **URL and Double Encoding**: `%2f%2fexample.com`, `%252f%252fexample.com`, `https:%2f%2fexample.com`
+7. **CRLF Header Injection**: `/%0d%0aLocation:%20https://example.com`
+8. **Termination and Whitespace**: `https://example.com%00`, `https://example.com%09`, `https://example.com.`
 
 ---
 
-## 5. Security & SSRF Protection
+## 5. Security and SSRF Protection
 
 By default, RedirX enforces strict SSRF protections:
 - **Private IP Blocking**: Resolves destination hostnames at every hop and blocks RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), and carrier-grade NAT (`100.64.0.0/10`).
 - **Cloud Metadata Defense**: Intercepts requests to `169.254.169.254`, `metadata.google.internal`, and other cloud metadata endpoints.
-- **Anti-DNS Rebinding**: The custom `SafeDialContext` resolves DNS once, validates the IP, and connects directly to the validated IP.
+- **Anti-DNS Rebinding**: The custom `SafeDialContext` resolves DNS and validates IP addressing at the TCP connection handshake.
 - **TLS Verification**: Verified by default. Skipped only with explicit `--insecure` flag.
 
 ---
 
-## 6. Installation & Building
+## 6. Installation and Building
 
 ### Prerequisites
 - Go 1.22+ (for building from source)
-- Linux (AMD64 or ARM64)
+- Linux (AMD64 or ARM64) or Windows (AMD64)
 
-### Building for Linux (AMD64 & ARM64)
+### Building for Linux (AMD64 and ARM64)
 
 ```bash
 # Build both Linux AMD64 and ARM64 binaries
@@ -156,21 +165,20 @@ Compiled binaries will be generated in `bin/`:
 - `bin/redirx_linux_amd64`
 - `bin/redirx_linux_arm64`
 
-### Installation to System PATH
+### Installation to System PATH (Linux / WSL2)
 
 ```bash
-# Copy to user local bin
-mkdir -p ~/.local/bin
-cp bin/redirx_linux_amd64 ~/.local/bin/redirx
-chmod +x ~/.local/bin/redirx
+# Copy binary to system path
+sudo cp bin/redirx_linux_amd64 /usr/local/bin/redirx
+sudo chmod +x /usr/local/bin/redirx
 
-# Ensure ~/.local/bin is in your PATH:
-export PATH="$HOME/.local/bin:$PATH"
+# Verify installation
+redirx version
 ```
 
 ---
 
-## 7. CLI Usage & Examples
+## 7. CLI Usage and Examples
 
 ### Single Target Scan
 ```bash
@@ -179,7 +187,11 @@ redirx -u "https://example.com/login?redirect=https://target.com"
 
 ### Bulk Scanning from File
 ```bash
-redirx -l urls.txt -t 20 --delay 100ms
+# Fast Mode (Default): Smart two-stage canary probing (over 94% traffic reduction on bulk lists)
+redirx -l urls.txt -t 20
+
+# Deep Mode: Exhaustive evasion fuzzing across all parameters and payloads
+redirx -l urls.txt -m deep -t 20 --delay 100ms
 ```
 
 ### Stdin Pipeline
@@ -187,7 +199,7 @@ redirx -l urls.txt -t 20 --delay 100ms
 cat urls.txt | redirx -stdin -format txt,html,json -name bugbounty-audit
 ```
 
-### Custom Test Domain & Payloads
+### Custom Test Domain and Payloads
 ```bash
 redirx -u "https://example.com/oauth" --test-domain "my-collaborator.net" --payload-file configs/payloads.txt
 ```
@@ -206,7 +218,7 @@ redirx -l targets.txt -name audit -format txt,html,json
 redirx -u "https://example.com/auth" -name audit -f
 ```
 
-### Inspecting Previous Results & Configuration
+### Inspecting Previous Results and Configuration
 ```bash
 redirx results
 redirx config
@@ -226,7 +238,9 @@ redirx update
 | `--url` | `-u` | `""` | Single target URL |
 | `--list` | `-l` | `""` | Path to file containing target URLs (one per line) |
 | `--stdin` | | `false` | Read target URLs from standard input |
+| `--mode` | `-m` | `fast` | Scan mode: `fast` (two-stage smart canary probe) or `deep` (exhaustive matrix) |
 | `--threads` | `-t` | `10` | Worker pool concurrency |
+| `--ticker` | | `true` | Display live terminal progress ticker (req/s, active workers, ETA) |
 | `--timeout` | | `10s` | HTTP timeout per request |
 | `--delay` | | `0s` | Delay between requests to the same host (e.g. `200ms`, `1s`) |
 | `--retry` | | `1` | Request retries on network error |
@@ -247,9 +261,9 @@ redirx update
 
 ---
 
-## 9. Verification & Testing
+## 9. Verification and Testing
 
-RedirX includes an automated test suite featuring Go `httptest` mock servers covering 19 distinct test scenarios:
+RedirX includes an automated test suite featuring Go `httptest` mock servers covering 28 distinct test scenarios:
 
 ```bash
 # Run full test suite
@@ -260,24 +274,36 @@ go vet ./...
 ```
 
 ### Test Coverage Highlights
-- ✅ Genuine Open Redirect detection
-- ✅ Normal internal redirect false-positive elimination
-- ✅ Fixed external redirect baseline comparison
-- ✅ Body reflection without redirect filtering
-- ✅ Multi-hop chained redirect tracking
-- ✅ Client-side JavaScript navigation detection
-- ✅ Client-side Meta-refresh detection
-- ✅ Redirect loop detection and depth limiting
-- ✅ Private IP / SSRF attempt blocking
-- ✅ Legacy path-segment stripping heuristic verification
-- ✅ Parameter extraction and inclusion/exclusion filtering
-- ✅ SSRF validator against loopback, private RFC 1918, link-local, and cloud metadata
-- ✅ Report serialization for TXT, JSON, and responsive HTML
-- ✅ File output resolution and auto-deduplication
+- Genuine Open Redirect detection
+- Normal internal redirect false-positive elimination
+- Fixed external redirect baseline comparison
+- Body reflection without redirect filtering
+- Multi-hop chained redirect tracking
+- Client-side JavaScript navigation detection (including ES6 template literals)
+- Client-side Meta-refresh detection
+- Redirect loop detection and depth limiting
+- Private IP / SSRF attempt blocking
+- Legacy path-segment stripping heuristic verification
+- Fast Mode Canary Probing (over 94% request reduction on bulk lists)
+- Stage 2 Evasion Escalation on responsive parameters
+- Strict domain boundary matching (`MatchesTestDomain`) eliminating domain collision false positives
+- Zero-allocation 3xx redirect reader and `sync.Pool` buffer reuse
+- Live progress ticker metrics and duration formatting
+- In-memory target URL deduplication
+- Pluggable `DetectionTechnique` registry and decoupled `RequestExecutor`
+- Parameter extraction and inclusion/exclusion filtering
+- SSRF validator against loopback, private RFC 1918, link-local, and cloud metadata
+- Report serialization for TXT, JSON, and responsive HTML
+- File output resolution and auto-deduplication
 
 ---
 
-## 10. License
+## 10. Educational Context
+
+RedirX is dedicated to the students and security researchers of **Arena Web Security** as an educational and operational reference for understanding URL parser differentials, HTTP redirect semantics, and defensible vulnerability validation.
+
+---
+
+## 11. License
 
 RedirX is open-source software licensed under the [MIT License](LICENSE).
-
