@@ -395,11 +395,11 @@ func TestTechniqueRegistry(t *testing.T) {
 		t.Errorf("expected only query_parameter enabled, got %v", enabled)
 	}
 
-	// When PathTest is true, both techniques should be enabled
+	// When PathTest is true, only PathCanonicalization should be enabled (isolated No-Redirect mode without payloads)
 	cfg.PathTest = true
 	enabledWithAll := reg.GetEnabled(cfg)
-	if len(enabledWithAll) != 2 {
-		t.Errorf("expected 2 techniques enabled, got %d", len(enabledWithAll))
+	if len(enabledWithAll) != 1 || enabledWithAll[0].ID() != "path_canonicalization" {
+		t.Errorf("expected only path_canonicalization enabled, got %v", enabledWithAll)
 	}
 }
 

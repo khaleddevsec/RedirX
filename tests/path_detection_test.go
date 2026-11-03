@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"redirx/internal/detector"
 	"redirx/internal/models"
 	"redirx/internal/redirect"
-	"redirx/internal/detector"
+	"redirx/internal/scanner"
+	"redirx/internal/stats"
 )
 
 // TestPathDetectionSuite implements the full behavior comparison and validation suite
@@ -313,5 +315,43 @@ func TestPathDetectionSuite(t *testing.T) {
 		}
 		// err can be context.DeadlineExceeded or nil, but no panic
 		_ = err
+	})
+
+	t.Run("14_PathModeZeroPayloadsAndFastRequests", func(t *testing.T) {
+		cfgPath := &models.ScanConfig{
+			PathTest:          true,
+			Timeout:           3 * time.Second,
+			Threads:           5,
+			SafeRedirectsOnly: false,
+		}
+		clientPath, _ := redirect.NewClient(cfgPath)
+		statsPath := stats.NewCollector(1)
+		enginePath := scanner.NewEngine(cfgPath, clientPath, statsPath)
+
+		targets := []string{
+			ts.URL + "/admin/login.php",
+			ts.URL + "/portal/view",
+			ts.URL + "/blog/tech",
+		}
+
+		findings, err := enginePath.ScanTargets(context.Background(), targets, nil)
+		if err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		// Verify zero payload injection occurred
+		if statsPath.GetTestedParameters() != 0 {
+			t.Errorf("expected 0 parameters tested in PathTest mode, got %d", statsPath.GetTestedParameters())
+		}
+
+		// Verify request count is minimal (2 requests per target = ~6 requests total, definitely < 10)
+		if statsPath.GetTotalRequests() > 10 {
+			t.Errorf("expected <= 10 total requests, got %d (payloads were pushed!)", statsPath.GetTotalRequests())
+		}
+
+		// Only /admin/login.php should be found
+		if len(findings) != 1 {
+			t.Errorf("expected exactly 1 finding (/admin/login.php), got %d", len(findings))
+		}
 	})
 }

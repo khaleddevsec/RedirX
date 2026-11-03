@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"redirx/internal/models"
@@ -80,21 +81,30 @@ func AnalyzePathAnomaly(ctx context.Context, rawURL string, fetcher PathFetcher)
 		return nil, nil // Redundant URL
 	}
 
-	// Step 6: Request original URL (follow redirects)
-	resOrig, err := fetcher(ctx, trimmedURL)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, nil
-	}
+	// Step 6 & 7: Request original URL and modified test URL concurrently (follow redirects)
+	var (
+		resOrig *redirect.ExecutionResult
+		errOrig error
+		resTest *redirect.ExecutionResult
+		errTest error
+		fetchWg sync.WaitGroup
+	)
 
-	// Step 7: Request modified test URL (follow redirects)
-	resTest, err := fetcher(ctx, testURL)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	fetchWg.Add(2)
+	go func() {
+		defer fetchWg.Done()
+		resOrig, errOrig = fetcher(ctx, trimmedURL)
+	}()
+	go func() {
+		defer fetchWg.Done()
+		resTest, errTest = fetcher(ctx, testURL)
+	}()
+	fetchWg.Wait()
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if errOrig != nil || errTest != nil || resOrig == nil || resTest == nil {
 		return nil, nil
 	}
 

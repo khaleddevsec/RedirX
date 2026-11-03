@@ -91,6 +91,11 @@ func (c *Collector) IncParameters() {
 	atomic.AddInt64(&c.testedParameters, 1)
 }
 
+// GetTestedParameters returns the atomic count of tested parameters.
+func (c *Collector) GetTestedParameters() int64 {
+	return atomic.LoadInt64(&c.testedParameters)
+}
+
 // AddFinding updates finding counters based on classification.
 func (c *Collector) AddFinding(classification models.Classification) {
 	switch classification {

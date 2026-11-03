@@ -36,7 +36,12 @@ func (t *QueryParameterTechnique) Description() string {
 }
 
 // IsEnabled indicates whether parameter injection is active.
+// When PathTest is enabled, parameter fuzzing and payload injection are strictly disabled
+// to preserve the pure No-Redirect path-canonicalization detection methodology from No-Redirect.py.
 func (t *QueryParameterTechnique) IsEnabled(cfg *models.ScanConfig) bool {
+	if cfg != nil && cfg.PathTest {
+		return false
+	}
 	return true
 }
 

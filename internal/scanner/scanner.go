@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"redirx/internal/detector"
 	"redirx/internal/logger"
@@ -172,17 +173,25 @@ func (e *Engine) scanSingleTarget(ctx context.Context, targetURL string) []model
 		return nil
 	}
 
+	// 2. Strict per-target timeout prevents hanging servers from causing worker depletion
+	targetTimeout := e.cfg.Timeout
+	if targetTimeout <= 0 {
+		targetTimeout = 6 * time.Second
+	}
+	targetCtx, cancel := context.WithTimeout(ctx, targetTimeout)
+	defer cancel()
+
 	var targetFindings []models.Finding
 	techniques := e.registry.GetEnabled(e.cfg)
 
 	for _, tech := range techniques {
 		select {
-		case <-ctx.Done():
+		case <-targetCtx.Done():
 			return targetFindings
 		default:
 		}
 
-		findings, err := tech.Execute(ctx, targetURL, e, e.cfg)
+		findings, err := tech.Execute(targetCtx, targetURL, e, e.cfg)
 		if err != nil {
 			if e.cfg.Verbose {
 				logger.PrintError("[%s] error on %s: %v", tech.Name(), targetURL, err)

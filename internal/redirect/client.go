@@ -78,10 +78,17 @@ func NewClient(cfg *models.ScanConfig) (*Client, error) {
 		maxIdleConnsPerHost = 10
 	}
 
+	dialTimeout := 4 * time.Second
+	if timeout > 0 && timeout < dialTimeout {
+		dialTimeout = timeout
+	}
+
 	transport := &http.Transport{
-		DialContext:           scope.NewSafeDialContext(timeout, cfg.SafeRedirectsOnly),
+		DialContext:           scope.NewSafeDialContext(dialTimeout, cfg.SafeRedirectsOnly),
 		TLSClientConfig:       tlsConfig,
+		TLSHandshakeTimeout:   4 * time.Second,
 		ResponseHeaderTimeout: timeout,
+		ExpectContinueTimeout: 1 * time.Second,
 		IdleConnTimeout:       30 * time.Second,
 		MaxIdleConns:          maxIdleConns,
 		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
